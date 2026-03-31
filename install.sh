@@ -28,8 +28,14 @@ detect_shell_rc() {
   esac
 }
 
+ensure_rc_parent_dir() {
+  local rc="$1"
+  mkdir -p "$(dirname "$rc")"
+}
+
 add_alias() {
   local rc="$1"
+  ensure_rc_parent_dir "$rc"
   if [ ! -f "$rc" ]; then
     touch "$rc"
   fi
@@ -43,6 +49,26 @@ add_alias() {
   esac
   printf '\n%s %s\n' "$line" "$ALIAS_TAG" >> "$rc"
   echo "  alias added to ${rc}"
+}
+
+prompt_for_alias() {
+  local rc="$1"
+  local answer
+
+  if [ ! -t 0 ]; then
+    echo "  skipped alias setup (non-interactive shell)"
+    return
+  fi
+
+  if ! read -rp "Add alias (claude → claude-hangul) to ${rc}? [Y/n] " answer; then
+    echo "  skipped alias setup (no input)"
+    return
+  fi
+
+  case "${answer:-Y}" in
+    [Yy]*|"") add_alias "$rc" ;;
+    *)        echo "  skipped" ;;
+  esac
 }
 
 remove_alias() {
@@ -86,11 +112,7 @@ do_install() {
   rc="$(detect_shell_rc)"
 
   echo ""
-  read -rp "Add alias (claude → claude-hangul) to ${rc}? [Y/n] " answer
-  case "${answer:-Y}" in
-    [Yy]*|"") add_alias "$rc" ;;
-    *)        echo "  skipped" ;;
-  esac
+  prompt_for_alias "$rc"
 
   echo ""
   echo "Done. Run 'claude-hangul' or open a new shell and run 'claude'."

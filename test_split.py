@@ -13,6 +13,7 @@ import types
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 SCRIPT_PATH = os.path.join(REPO_ROOT, "claude-hangul")
+INSTALL_SCRIPT = os.path.join(REPO_ROOT, "install.sh")
 
 
 def load_module():
@@ -64,6 +65,49 @@ def run_wrapper_with_fake_claude(fake_script: str):
         finally:
             os.close(slave_fd)
             os.close(master_fd)
+
+
+def run_install(
+    home_dir: str, shell_path: str, input_text: str | None = None, use_tty: bool = False
+):
+    """Run install.sh with an isolated HOME directory."""
+    env = os.environ.copy()
+    env["HOME"] = home_dir
+    env["SHELL"] = shell_path
+
+    if use_tty:
+        master_fd, slave_fd = pty.openpty()
+        try:
+            proc = subprocess.Popen(
+                ["bash", INSTALL_SCRIPT],
+                cwd=REPO_ROOT,
+                env=env,
+                stdin=slave_fd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            if input_text is not None:
+                os.write(master_fd, input_text.encode())
+            stdout, stderr = proc.communicate(timeout=5)
+            return subprocess.CompletedProcess(
+                proc.args, proc.returncode, stdout, stderr
+            )
+        finally:
+            os.close(slave_fd)
+            os.close(master_fd)
+
+    return subprocess.run(
+        ["bash", INSTALL_SCRIPT],
+        cwd=REPO_ROOT,
+        env=env,
+        input=input_text,
+        stdin=subprocess.DEVNULL if input_text is None else None,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        timeout=5,
+    )
 
 
 def test_del_plus_korean():
@@ -172,6 +216,30 @@ def test_wrapper_preserves_signal_exit_code():
     """Proxy must preserve shell-style signal exit codes."""
     proc = run_wrapper_with_fake_claude("#!/bin/sh\nkill -TERM $$\n")
     assert proc.returncode == 143, proc.returncode
+
+
+def test_install_noninteractive_skips_alias_prompt():
+    """Non-interactive installs should succeed without prompting."""
+    with tempfile.TemporaryDirectory() as home_dir:
+        proc = run_install(home_dir, "/bin/zsh")
+        installed = os.path.join(home_dir, ".local", "bin", "claude-hangul")
+
+        assert proc.returncode == 0, proc.stderr
+        assert os.path.isfile(installed), installed
+        assert "skipped alias setup (non-interactive shell)" in proc.stdout
+
+
+def test_install_creates_fish_config_dir():
+    """Fish installs should create the config directory before writing alias."""
+    with tempfile.TemporaryDirectory() as home_dir:
+        proc = run_install(home_dir, "/bin/fish", "\n", use_tty=True)
+        config_path = os.path.join(home_dir, ".config", "fish", "config.fish")
+
+        assert proc.returncode == 0, proc.stderr
+        assert os.path.isfile(config_path), config_path
+        with open(config_path) as f:
+            contents = f.read()
+        assert "alias claude 'claude-hangul' # claude-hangul" in contents
 
 
 if __name__ == "__main__":

@@ -18,7 +18,7 @@ bash install.sh
 <summary>한 줄 설치</summary>
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/songhyun-k/claude-hangul/main/claude-hangul \
+mkdir -p ~/.local/bin && curl -fsSL https://raw.githubusercontent.com/songhyun-k/claude-hangul/main/claude-hangul \
   -o ~/.local/bin/claude-hangul && chmod +x ~/.local/bin/claude-hangul
 ```
 
