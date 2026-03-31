@@ -63,7 +63,7 @@ claude-hangul:
 ### 방법 1: 직접 설치
 
 ```bash
-git clone https://github.com/instructkr/claude-hangul.git
+git clone https://github.com/songhyun-k/claude-hangul.git
 cd claude-hangul
 bash install.sh
 ```
@@ -71,7 +71,7 @@ bash install.sh
 ### 방법 2: 수동 복사
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/instructkr/claude-hangul/main/claude-hangul \
+curl -fsSL https://raw.githubusercontent.com/songhyun-k/claude-hangul/main/claude-hangul \
   -o ~/.local/bin/claude-hangul
 chmod +x ~/.local/bin/claude-hangul
 ```
