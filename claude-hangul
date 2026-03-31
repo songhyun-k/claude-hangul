@@ -1,0 +1,263 @@
+#!/usr/bin/env python3
+"""
+claude-hangul: PTY proxy that fixes Korean (Hangul) IME input in Claude Code.
+
+iOS terminal apps (Termius, Moshi, etc.) send IME composition as:
+    ㄱ → DEL(0x7f) + 가
+Claude Code's DEL filter processes the backspace but discards the composed char.
+
+This proxy splits DEL + non-ASCII sequences into separate pty writes with a
+small delay, so Claude Code processes them as independent keystrokes.
+
+Usage:
+    claude-hangul [claude args...]
+
+Examples:
+    claude-hangul
+    claude-hangul --model sonnet
+    claude-hangul -p "hello"
+"""
+
+import errno
+import fcntl
+import os
+import pty
+import select
+import signal
+import struct
+import sys
+import termios
+import time
+import tty
+
+# Delay between split writes (seconds).
+# Must be long enough for Bun's event loop to process the first readable event.
+# 5ms is safe — processInput runs in <1ms, and Bun ticks at ~1ms.
+SPLIT_DELAY_S = 0.005
+
+
+def find_claude():
+    """Locate the real claude binary."""
+    # Check common locations
+    candidates = [
+        os.path.expanduser("~/.local/bin/claude"),
+        "/usr/local/bin/claude",
+        "/opt/homebrew/bin/claude",
+    ]
+    for c in candidates:
+        real = os.path.realpath(c)
+        if os.path.isfile(real) and os.access(real, os.X_OK):
+            return real
+
+    # Fallback: which
+    path = os.popen("which claude").read().strip()
+    if path:
+        real = os.path.realpath(path)
+        if os.path.isfile(real) and os.access(real, os.X_OK):
+            return real
+
+    return None
+
+
+def get_winsize(fd):
+    try:
+        return fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\x00" * 8)
+    except OSError:
+        return struct.pack("HHHH", 24, 80, 0, 0)
+
+
+def set_winsize(fd, ws):
+    try:
+        fcntl.ioctl(fd, termios.TIOCSWINSZ, ws)
+    except OSError:
+        pass
+
+
+def split_del_sequences(data: bytes) -> list[bytes]:
+    """
+    Split a byte buffer wherever DEL (0x7f) is immediately followed by a
+    non-ASCII byte (>= 0x80, i.e. the start of a UTF-8 multi-byte character).
+
+    Normal backspace (DEL alone, or DEL + ASCII) passes through unsplit because
+    Claude Code's DEL filter handles that case correctly — the bug only
+    manifests when DEL is coalesced with a CJK composed character.
+
+    Returns a list of 1+ chunks.  If no split is needed, returns [data].
+    """
+    chunks: list[bytes] = []
+    last = 0
+    i = 0
+    while i < len(data):
+        if data[i] == 0x7F and i + 1 < len(data) and data[i + 1] >= 0x80:
+            # Include everything up to and including DEL
+            chunks.append(data[last : i + 1])
+            last = i + 1
+        i += 1
+    if last < len(data):
+        chunks.append(data[last:])
+    return chunks if chunks else [data]
+
+
+def main() -> int:
+    claude_path = find_claude()
+    if not claude_path:
+        print("claude-hangul: 'claude' binary not found", file=sys.stderr)
+        return 1
+
+    # Resolve symlink to actual binary (claude -> versions/x.y.z)
+    claude_real = os.path.realpath(claude_path)
+
+    if not os.isatty(sys.stdin.fileno()):
+        # Not a TTY — just exec claude directly, proxy not needed
+        os.execvp(claude_real, ["claude"] + sys.argv[1:])
+
+    # --- Create PTY pair ---
+    master_fd, slave_fd = pty.openpty()
+
+    # Copy terminal attributes and window size
+    old_attrs = termios.tcgetattr(sys.stdin)
+    try:
+        termios.tcsetattr(slave_fd, termios.TCSANOW, old_attrs)
+    except OSError:
+        pass
+    set_winsize(slave_fd, get_winsize(sys.stdin.fileno()))
+
+    # --- Fork ---
+    child_pid = os.fork()
+
+    if child_pid == 0:
+        # ---- Child: exec claude with slave pty ----
+        os.close(master_fd)
+        os.setsid()
+        fcntl.ioctl(slave_fd, termios.TIOCSCTTY, 0)
+        os.dup2(slave_fd, 0)
+        os.dup2(slave_fd, 1)
+        os.dup2(slave_fd, 2)
+        if slave_fd > 2:
+            os.close(slave_fd)
+        os.execvp(claude_real, ["claude"] + sys.argv[1:])
+        os._exit(127)
+
+    # ---- Parent: proxy stdin <-> master_fd ----
+    os.close(slave_fd)
+
+    # Put real stdin into raw mode so every byte is forwarded immediately
+    tty.setraw(sys.stdin)
+
+    # Track child status
+    child_exited = False
+    child_status = 0
+
+    def on_sigwinch(_sig, _frame):
+        ws = get_winsize(sys.stdin.fileno())
+        set_winsize(master_fd, ws)
+        try:
+            os.kill(child_pid, signal.SIGWINCH)
+        except ProcessLookupError:
+            pass
+
+    def on_sigchld(_sig, _frame):
+        nonlocal child_exited, child_status
+        try:
+            pid, status = os.waitpid(child_pid, os.WNOHANG)
+            if pid == child_pid:
+                child_exited = True
+                child_status = (
+                    os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+                )
+        except ChildProcessError:
+            child_exited = True
+
+    signal.signal(signal.SIGWINCH, on_sigwinch)
+    signal.signal(signal.SIGCHLD, on_sigchld)
+
+    stdin_fd = sys.stdin.fileno()
+    stdout_fd = sys.stdout.fileno()
+    exit_code = 0
+
+    try:
+        while not child_exited:
+            try:
+                rlist, _, _ = select.select([stdin_fd, master_fd], [], [], 0.25)
+            except (OSError, select.error) as e:
+                if getattr(e, "errno", None) == errno.EINTR or (
+                    isinstance(e, OSError) and e.errno == errno.EINTR
+                ):
+                    continue
+                break
+
+            if stdin_fd in rlist:
+                try:
+                    data = os.read(stdin_fd, 4096)
+                except OSError:
+                    break
+                if not data:
+                    break
+
+                chunks = split_del_sequences(data)
+                for j, chunk in enumerate(chunks):
+                    try:
+                        os.write(master_fd, chunk)
+                    except OSError:
+                        child_exited = True
+                        break
+                    if j < len(chunks) - 1:
+                        time.sleep(SPLIT_DELAY_S)
+
+            if master_fd in rlist:
+                try:
+                    data = os.read(master_fd, 65536)
+                except OSError:
+                    break
+                if not data:
+                    break
+                try:
+                    os.write(stdout_fd, data)
+                except OSError:
+                    break
+
+        # Drain remaining output
+        while True:
+            try:
+                rlist, _, _ = select.select([master_fd], [], [], 0.05)
+            except (OSError, select.error):
+                break
+            if not rlist:
+                break
+            try:
+                data = os.read(master_fd, 65536)
+                if not data:
+                    break
+                os.write(stdout_fd, data)
+            except OSError:
+                break
+
+        exit_code = child_status
+
+    except KeyboardInterrupt:
+        try:
+            os.kill(child_pid, signal.SIGINT)
+        except ProcessLookupError:
+            pass
+    finally:
+        # Restore terminal
+        try:
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, old_attrs)
+        except (OSError, termios.error):
+            pass
+        try:
+            os.close(master_fd)
+        except OSError:
+            pass
+        # Ensure child is reaped
+        if not child_exited:
+            try:
+                os.waitpid(child_pid, 0)
+            except ChildProcessError:
+                pass
+
+    return exit_code
+
+
+if __name__ == "__main__":
+    sys.exit(main())
