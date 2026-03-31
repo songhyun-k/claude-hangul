@@ -3,25 +3,154 @@ set -euo pipefail
 
 INSTALL_DIR="${HOME}/.local/bin"
 SCRIPT_NAME="claude-hangul"
-SOURCE="$(cd "$(dirname "$0")" && pwd)/${SCRIPT_NAME}"
+ALIAS_LINE="alias claude='claude-hangul'"
+ALIAS_TAG="# claude-hangul"
 
-if [ ! -f "$SOURCE" ]; then
-  echo "Error: ${SCRIPT_NAME} not found in $(dirname "$SOURCE")" >&2
-  exit 1
-fi
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
 
-mkdir -p "$INSTALL_DIR"
-cp "$SOURCE" "${INSTALL_DIR}/${SCRIPT_NAME}"
-chmod +x "${INSTALL_DIR}/${SCRIPT_NAME}"
+detect_shell_rc() {
+  local shell_name
+  shell_name="$(basename "${SHELL:-/bin/bash}")"
+  case "$shell_name" in
+    zsh)  echo "${HOME}/.zshrc" ;;
+    bash)
+      if [ -f "${HOME}/.bash_profile" ]; then
+        echo "${HOME}/.bash_profile"
+      else
+        echo "${HOME}/.bashrc"
+      fi
+      ;;
+    fish) echo "${HOME}/.config/fish/config.fish" ;;
+    *)    echo "${HOME}/.profile" ;;
+  esac
+}
 
-if ! command -v claude &>/dev/null; then
-  echo "Warning: 'claude' not found in PATH. Install Claude Code first." >&2
-fi
+add_alias() {
+  local rc="$1"
+  if [ ! -f "$rc" ]; then
+    touch "$rc"
+  fi
+  if grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
+    echo "  alias already in ${rc}"
+    return
+  fi
+  printf '\n%s %s\n' "$ALIAS_LINE" "$ALIAS_TAG" >> "$rc"
+  echo "  alias added to ${rc}"
+}
 
-echo "Installed: ${INSTALL_DIR}/${SCRIPT_NAME}"
-echo ""
-echo "Usage:"
-echo "  claude-hangul          # run Claude Code with Korean input fix"
-echo ""
-echo "Optional alias (add to ~/.zshrc or ~/.bashrc):"
-echo "  alias claude='claude-hangul'"
+remove_alias() {
+  local rc="$1"
+  if [ ! -f "$rc" ]; then
+    return
+  fi
+  if grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
+    # Remove lines containing the tag
+    sed -i'' -e "/${ALIAS_TAG}/d" "$rc"
+    echo "  alias removed from ${rc}"
+  fi
+}
+
+# ---------------------------------------------------------------------------
+# Commands
+# ---------------------------------------------------------------------------
+
+do_install() {
+  local source="${SCRIPT_DIR}/${SCRIPT_NAME}"
+  if [ ! -f "$source" ]; then
+    echo "Error: ${SCRIPT_NAME} not found in ${SCRIPT_DIR}" >&2
+    exit 1
+  fi
+
+  mkdir -p "$INSTALL_DIR"
+  cp "$source" "${INSTALL_DIR}/${SCRIPT_NAME}"
+  chmod +x "${INSTALL_DIR}/${SCRIPT_NAME}"
+  echo "Installed ${INSTALL_DIR}/${SCRIPT_NAME}"
+
+  if ! command -v claude &>/dev/null; then
+    echo ""
+    echo "Warning: 'claude' not found in PATH. Install Claude Code first." >&2
+  fi
+
+  local rc
+  rc="$(detect_shell_rc)"
+
+  echo ""
+  read -rp "Add alias (claude → claude-hangul) to ${rc}? [Y/n] " answer
+  case "${answer:-Y}" in
+    [Yy]*|"") add_alias "$rc" ;;
+    *)        echo "  skipped" ;;
+  esac
+
+  echo ""
+  echo "Done. Run 'claude-hangul' or open a new shell and run 'claude'."
+}
+
+do_uninstall() {
+  local removed=false
+
+  if [ -f "${INSTALL_DIR}/${SCRIPT_NAME}" ]; then
+    rm "${INSTALL_DIR}/${SCRIPT_NAME}"
+    echo "Removed ${INSTALL_DIR}/${SCRIPT_NAME}"
+    removed=true
+  fi
+
+  # Remove alias from all common rc files
+  for rc in "${HOME}/.zshrc" "${HOME}/.bashrc" "${HOME}/.bash_profile" \
+            "${HOME}/.config/fish/config.fish" "${HOME}/.profile"; do
+    remove_alias "$rc"
+  done
+
+  if [ "$removed" = true ]; then
+    echo ""
+    echo "Uninstalled. Open a new shell to apply."
+  else
+    echo "claude-hangul is not installed in ${INSTALL_DIR}"
+  fi
+}
+
+do_status() {
+  if [ -f "${INSTALL_DIR}/${SCRIPT_NAME}" ]; then
+    echo "Installed: ${INSTALL_DIR}/${SCRIPT_NAME}"
+    local rc
+    rc="$(detect_shell_rc)"
+    if grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
+      echo "Alias:     active (${rc})"
+    else
+      echo "Alias:     not set"
+    fi
+  else
+    echo "Not installed"
+  fi
+}
+
+usage() {
+  cat <<EOF
+Usage: install.sh [command]
+
+Commands:
+  install     Install claude-hangul and optionally set up alias (default)
+  uninstall   Remove claude-hangul and clean up alias
+  status      Show installation status
+  help        Show this message
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+case "${1:-install}" in
+  install)    do_install ;;
+  uninstall)  do_uninstall ;;
+  status)     do_status ;;
+  help|-h|--help) usage ;;
+  *)
+    echo "Unknown command: $1" >&2
+    usage >&2
+    exit 1
+    ;;
+esac

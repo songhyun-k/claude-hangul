@@ -60,20 +60,38 @@ claude-hangul:
 
 ## 설치
 
-### 방법 1: 직접 설치
+### 방법 1: git clone
 
 ```bash
 git clone https://github.com/songhyun-k/claude-hangul.git
 cd claude-hangul
-bash install.sh
+bash install.sh          # 설치 + alias 설정까지 대화형으로 진행
 ```
 
-### 방법 2: 수동 복사
+### 방법 2: 한 줄 설치
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/songhyun-k/claude-hangul/main/claude-hangul \
-  -o ~/.local/bin/claude-hangul
-chmod +x ~/.local/bin/claude-hangul
+  -o ~/.local/bin/claude-hangul && chmod +x ~/.local/bin/claude-hangul
+```
+
+### 삭제
+
+```bash
+bash install.sh uninstall   # 바이너리 + alias 모두 정리
+```
+
+또는 수동으로:
+
+```bash
+rm ~/.local/bin/claude-hangul
+# ~/.zshrc 등에서 alias claude='claude-hangul' 줄 제거
+```
+
+### 상태 확인
+
+```bash
+bash install.sh status
 ```
 
 ### 요구사항
@@ -96,12 +114,7 @@ claude-hangul -p "코드 리뷰해줘"
 claude-hangul --resume
 ```
 
-### alias 설정 (선택)
-
-```bash
-# ~/.zshrc 또는 ~/.bashrc에 추가
-alias claude='claude-hangul'
-```
+설치 시 alias를 설정했다면 기존처럼 `claude`만 입력해도 됩니다.
 
 ---
 

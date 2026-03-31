@@ -18,6 +18,8 @@ Examples:
     claude-hangul -p "hello"
 """
 
+from __future__ import annotations
+
 import errno
 import fcntl
 import os
@@ -37,22 +39,26 @@ SPLIT_DELAY_S = 0.005
 
 
 def find_claude():
-    """Locate the real claude binary."""
-    # Check common locations
+    """Locate the real claude binary, avoiding symlinks back to ourselves."""
+    import shutil
+
+    self_real = os.path.realpath(__file__)
+
     candidates = [
         os.path.expanduser("~/.local/bin/claude"),
         "/usr/local/bin/claude",
         "/opt/homebrew/bin/claude",
     ]
+
+    # Also check PATH via shutil.which (safe — ignores shell aliases)
+    which = shutil.which("claude")
+    if which:
+        candidates.append(which)
+
     for c in candidates:
         real = os.path.realpath(c)
-        if os.path.isfile(real) and os.access(real, os.X_OK):
-            return real
-
-    # Fallback: which
-    path = os.popen("which claude").read().strip()
-    if path:
-        real = os.path.realpath(path)
+        if real == self_real:
+            continue  # skip ourselves
         if os.path.isfile(real) and os.access(real, os.X_OK):
             return real
 
@@ -168,8 +174,16 @@ def main() -> int:
         except ChildProcessError:
             child_exited = True
 
+    def on_sigterm(_sig, _frame):
+        try:
+            os.kill(child_pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
+
     signal.signal(signal.SIGWINCH, on_sigwinch)
     signal.signal(signal.SIGCHLD, on_sigchld)
+    signal.signal(signal.SIGTERM, on_sigterm)
+    signal.signal(signal.SIGHUP, on_sigterm)
 
     stdin_fd = sys.stdin.fileno()
     stdout_fd = sys.stdout.fileno()

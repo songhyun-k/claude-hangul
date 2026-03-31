@@ -77,6 +77,26 @@ def test_prefix_text_then_del_korean():
     assert chunks == [b"abc\x7f", b"\xea\xb0\x80"]
 
 
+def test_consecutive_dels_then_korean():
+    """Two DELs then Korean: only the second DEL triggers split."""
+    data = b"\x7f\x7f\xea\xb0\x80"
+    chunks = split(data)
+    assert chunks == [b"\x7f\x7f", b"\xea\xb0\x80"], chunks
+
+
+def test_del_plus_bare_continuation_byte():
+    """DEL + bare continuation byte (0x80, invalid UTF-8 start) still splits."""
+    data = b"\x7f\x80"
+    chunks = split(data)
+    assert len(chunks) == 2
+
+
+def test_only_non_ascii():
+    """Pure Korean text without DEL."""
+    data = "안녕하세요".encode()
+    assert split(data) == [data]
+
+
 if __name__ == "__main__":
     passed = 0
     failed = 0
