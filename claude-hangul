@@ -196,10 +196,8 @@ def main() -> int:
         while not child_exited:
             try:
                 rlist, _, _ = select.select([stdin_fd, master_fd], [], [], 0.25)
-            except (OSError, select.error) as e:
-                if getattr(e, "errno", None) == errno.EINTR or (
-                    isinstance(e, OSError) and e.errno == errno.EINTR
-                ):
+            except OSError as e:
+                if e.errno == errno.EINTR:
                     continue
                 break
 
