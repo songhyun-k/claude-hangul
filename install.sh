@@ -4,6 +4,7 @@ set -euo pipefail
 INSTALL_DIR="${HOME}/.local/bin"
 SCRIPT_NAME="claude-hangul"
 ALIAS_LINE="alias claude='claude-hangul'"
+ALIAS_LINE_FISH="alias claude 'claude-hangul'"
 ALIAS_TAG="# claude-hangul"
 
 # ---------------------------------------------------------------------------
@@ -36,7 +37,11 @@ add_alias() {
     echo "  alias already in ${rc}"
     return
   fi
-  printf '\n%s %s\n' "$ALIAS_LINE" "$ALIAS_TAG" >> "$rc"
+  local line="$ALIAS_LINE"
+  case "$rc" in
+    *config.fish) line="$ALIAS_LINE_FISH" ;;
+  esac
+  printf '\n%s %s\n' "$line" "$ALIAS_TAG" >> "$rc"
   echo "  alias added to ${rc}"
 }
 
