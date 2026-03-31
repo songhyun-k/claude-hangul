@@ -95,8 +95,11 @@ def split_del_sequences(data: bytes) -> list[bytes]:
     i = 0
     while i < len(data):
         if data[i] == 0x7F and i + 1 < len(data) and data[i + 1] >= 0x80:
-            # Include everything up to and including DEL
-            chunks.append(data[last : i + 1])
+            # Split content before DEL into its own chunk
+            if i > last:
+                chunks.append(data[last:i])
+            # DEL as an isolated chunk
+            chunks.append(data[i : i + 1])
             last = i + 1
         i += 1
     if last < len(data):
