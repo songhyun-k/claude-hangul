@@ -188,17 +188,20 @@ python3 test_split.py
 
 ```
   PASS  test_chinese
+  PASS  test_consecutive_dels_then_korean
   PASS  test_del_alone
   PASS  test_del_at_end
   PASS  test_del_plus_ascii
+  PASS  test_del_plus_bare_continuation_byte
   PASS  test_del_plus_korean
   PASS  test_empty
   PASS  test_japanese
   PASS  test_multi_composition
+  PASS  test_only_non_ascii
   PASS  test_prefix_text_then_del_korean
   PASS  test_pure_text
 
-10 passed, 0 failed
+13 passed, 0 failed
 ```
 
 ---

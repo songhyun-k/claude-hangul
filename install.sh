@@ -47,7 +47,7 @@ remove_alias() {
   fi
   if grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
     # Remove lines containing the tag
-    sed -i'' -e "/${ALIAS_TAG}/d" "$rc"
+    sed -i '' "/${ALIAS_TAG}/d" "$rc"
     echo "  alias removed from ${rc}"
   fi
 }
@@ -88,25 +88,28 @@ do_install() {
 }
 
 do_uninstall() {
-  local removed=false
+  local did_something=false
 
   if [ -f "${INSTALL_DIR}/${SCRIPT_NAME}" ]; then
     rm "${INSTALL_DIR}/${SCRIPT_NAME}"
     echo "Removed ${INSTALL_DIR}/${SCRIPT_NAME}"
-    removed=true
+    did_something=true
   fi
 
   # Remove alias from all common rc files
   for rc in "${HOME}/.zshrc" "${HOME}/.bashrc" "${HOME}/.bash_profile" \
             "${HOME}/.config/fish/config.fish" "${HOME}/.profile"; do
-    remove_alias "$rc"
+    if [ -f "$rc" ] && grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
+      remove_alias "$rc"
+      did_something=true
+    fi
   done
 
-  if [ "$removed" = true ]; then
+  if [ "$did_something" = true ]; then
     echo ""
     echo "Uninstalled. Open a new shell to apply."
   else
-    echo "claude-hangul is not installed in ${INSTALL_DIR}"
+    echo "claude-hangul is not installed."
   fi
 }
 
