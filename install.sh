@@ -46,8 +46,12 @@ remove_alias() {
     return
   fi
   if grep -qF "$ALIAS_TAG" "$rc" 2>/dev/null; then
-    # Remove lines containing the tag
-    sed -i '' "/${ALIAS_TAG}/d" "$rc"
+    # Remove lines containing the tag (compatible with both macOS and GNU sed)
+    if sed --version >/dev/null 2>&1; then
+      sed -i "/${ALIAS_TAG}/d" "$rc"
+    else
+      sed -i '' "/${ALIAS_TAG}/d" "$rc"
+    fi
     echo "  alias removed from ${rc}"
   fi
 }
