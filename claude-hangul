@@ -65,6 +65,15 @@ def find_claude():
     return None
 
 
+def decode_wait_status(status: int) -> int:
+    """Translate waitpid() status to a shell-style exit code."""
+    if os.WIFEXITED(status):
+        return os.WEXITSTATUS(status)
+    if os.WIFSIGNALED(status):
+        return 128 + os.WTERMSIG(status)
+    return 1
+
+
 def get_winsize(fd):
     try:
         return fcntl.ioctl(fd, termios.TIOCGWINSZ, b"\x00" * 8)
@@ -157,6 +166,28 @@ def main() -> int:
     child_exited = False
     child_status = 0
 
+    def reap_child(wait_flags: int) -> bool:
+        nonlocal child_exited, child_status
+
+        if child_exited:
+            return True
+
+        try:
+            pid, status = os.waitpid(child_pid, wait_flags)
+        except ChildProcessError:
+            child_exited = True
+            return True
+
+        if pid == 0:
+            return False
+
+        if pid == child_pid:
+            child_exited = True
+            child_status = decode_wait_status(status)
+            return True
+
+        return False
+
     def on_sigwinch(_sig, _frame):
         ws = get_winsize(sys.stdin.fileno())
         set_winsize(master_fd, ws)
@@ -166,16 +197,7 @@ def main() -> int:
             pass
 
     def on_sigchld(_sig, _frame):
-        nonlocal child_exited, child_status
-        try:
-            pid, status = os.waitpid(child_pid, os.WNOHANG)
-            if pid == child_pid:
-                child_exited = True
-                child_status = (
-                    os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
-                )
-        except ChildProcessError:
-            child_exited = True
+        reap_child(os.WNOHANG)
 
     def on_sigterm(_sig, _frame):
         try:
@@ -247,6 +269,9 @@ def main() -> int:
             except OSError:
                 break
 
+        reap_child(os.WNOHANG)
+        if not child_exited:
+            reap_child(0)
         exit_code = child_status
 
     except KeyboardInterrupt:
@@ -267,7 +292,7 @@ def main() -> int:
         # Ensure child is reaped
         if not child_exited:
             try:
-                os.waitpid(child_pid, 0)
+                reap_child(0)
             except ChildProcessError:
                 pass
 
