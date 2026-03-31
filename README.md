@@ -200,8 +200,9 @@ python3 test_split.py
   PASS  test_only_non_ascii
   PASS  test_prefix_text_then_del_korean
   PASS  test_pure_text
+  PASS  test_rapid_triple_composition
 
-13 passed, 0 failed
+14 passed, 0 failed
 ```
 
 ---
